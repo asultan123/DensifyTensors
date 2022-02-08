@@ -5,12 +5,15 @@ description = ""
 authors = ["asultan123 <asultan@aucegypt.edu>"]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.9,<3.11"
 gurobipy = "^9.5.0"
 numpy = "^1.22.2"
 torch = "^1.10.2"
 networkx = "^2.6.3"
 ipykernel = "^6.9.0"
+scipy = "^1.8.0"
+seaborn = "^0.11.2"
+matplotlib = "^3.5.1"
 
 [tool.poetry.dev-dependencies]
 
