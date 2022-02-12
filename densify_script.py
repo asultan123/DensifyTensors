@@ -256,7 +256,7 @@ def quantize_model(model):
 
 def main():
     tensor_size = (64, 64, 3)
-    weight_tensor = generate_sparse_tensor(tensor_size, density=0.05)
+    weight_tensor = generate_sparse_tensor(tensor_size, density=0.05) # sparsity relationship weird
     nn_model_f32 = M(weight_tensor)
     nn_model_i8 = quantize_model(nn_model_f32)
     print(
