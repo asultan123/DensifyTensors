@@ -172,7 +172,7 @@ def tucker_decomposition_conv_layer(layer):
     ranks = estimate_ranks(layer)
     print(layer, "VBMF Estimated ranks", ranks)
     core, [last, first] = partial_tucker(
-        layer.weight.data.numpy(), modes=[0, 1], rank=ranks
+        layer.weight.data.numpy(), modes=[0, 1]
     )
 
     # A pointwise convolution that reduces the channels from S to R3
