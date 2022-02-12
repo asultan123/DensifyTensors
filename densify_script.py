@@ -162,7 +162,7 @@ def get_tensor_density(tensor):
 
 
 
-def tucker_decomposition_conv_layer(layer):
+def tucker_decomposition_conv_layer(layer, rank):
     """Gets a conv layer,
     returns a nn.Sequential object with the Tucker decomposition.
     The ranks are estimated with a Python implementation of VBMF
@@ -173,7 +173,7 @@ def tucker_decomposition_conv_layer(layer):
     print(layer, "VBMF Estimated ranks", ranks)
     # TODO: RANK CAN AFFECT CORE SPARSITY, FULL RANK HAS HIGHER SPARSITY, NEED TO STUDY RANK RELATIONSHIP WIT HSPARSITYw
     core, [last, first] = partial_tucker(
-        layer.weight.data.numpy(), modes=[0, 1] 
+        layer.weight.data.numpy(), modes=[0, 1], rank=[rank, rank]
     )
 
     # A pointwise convolution that reduces the channels from S to R3
@@ -213,10 +213,10 @@ def tucker_decomposition_conv_layer(layer):
     last_layer.bias.data = layer.bias.data
 
     first_layer.weight.data = (
-        torch.transpose(torch.tensor(first), 1, 0).unsqueeze(-1).unsqueeze(-1)
+        torch.transpose(torch.tensor(np.copy(first)), 1, 0).unsqueeze(-1).unsqueeze(-1)
     )
-    last_layer.weight.data = torch.tensor(last).unsqueeze(-1).unsqueeze(-1)
-    core_layer.weight.data = torch.tensor(core)
+    last_layer.weight.data = torch.tensor(np.copy(last)).unsqueeze(-1).unsqueeze(-1)
+    core_layer.weight.data = torch.tensor(np.copy(core))
 
     new_layers = [first_layer, core_layer, last_layer]
     return new_layers
@@ -255,26 +255,28 @@ def quantize_model(model):
 
 
 def main():
-    tensor_size = (32, 64, 3)
-    weight_tensor = generate_sparse_tensor(tensor_size, density=0.77)
+    tensor_size = (64, 64, 3)
+    weight_tensor = generate_sparse_tensor(tensor_size, density=0.05)
     nn_model_f32 = M(weight_tensor)
-    compressed_layers = tucker_decomposition_conv_layer(nn_model_f32.conv)
+    nn_model_i8 = quantize_model(nn_model_f32)
     print(
         f"original layer density {get_tensor_density(nn_model_f32.conv.weight)}"
     )    
-    nn_model_i8 = quantize_model(nn_model_f32)
     print(
         f"original quantized layer density {get_tensor_density(nn_model_i8.conv.weight())}"
     )
-    for layer in compressed_layers:
-        compressed_nn_model = M(layer.weight.data.numpy())
-        print(
-            f"compressed layer density {get_tensor_density(compressed_nn_model.conv.weight)}"
-        )
-        quantized_compressed_nn_model = quantize_model(compressed_nn_model)
-        print(
-            f"quantized compressed layer density {get_tensor_density(quantized_compressed_nn_model.conv.weight())}"
-        )
+    for rank in range(1, 65):
+        print(f'rank:{rank}')
+        compressed_layers = tucker_decomposition_conv_layer(nn_model_f32.conv,rank)
+        for layer in compressed_layers:
+            compressed_nn_model = M(layer.weight.data.numpy())
+            print(
+                f"compressed layer density {get_tensor_density(compressed_nn_model.conv.weight)}"
+            )
+            quantized_compressed_nn_model = quantize_model(compressed_nn_model)
+            print(
+                f"quantized compressed layer density {get_tensor_density(quantized_compressed_nn_model.conv.weight())}"
+            )
 
 
 if __name__ == "__main__":
