@@ -171,8 +171,9 @@ def tucker_decomposition_conv_layer(layer):
 
     ranks = estimate_ranks(layer)
     print(layer, "VBMF Estimated ranks", ranks)
+    # TODO: RANK CAN AFFECT CORE SPARSITY, FULL RANK HAS HIGHER SPARSITY, NEED TO STUDY RANK RELATIONSHIP WIT HSPARSITYw
     core, [last, first] = partial_tucker(
-        layer.weight.data.numpy(), modes=[0, 1]
+        layer.weight.data.numpy(), modes=[0, 1] 
     )
 
     # A pointwise convolution that reduces the channels from S to R3
