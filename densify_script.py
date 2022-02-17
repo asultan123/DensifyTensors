@@ -21,7 +21,7 @@ def generate_sparse_tensor(size, density):
 
 
 def get_non_zero_count(matrix):
-    return prod(matrix[np.where(matrix > 0 or matrix < 0)].shape)
+    return prod(matrix[np.logical_or(np.greater(matrix, 0), np.less(matrix, 0))].shape)
 
 
 def calc_density(matrix):
@@ -40,7 +40,7 @@ def density_of_remaining_weights(original_matrix, selection_bitmap):
     return unselected_ones / total_unselected
 
 
-def find_densest_subtensor_in_weight_tensor(
+def find_sparsest_subtensor_in_weight_tensor(
     tensor,
     min_filters=None,
     min_channels=None,
@@ -48,15 +48,14 @@ def find_densest_subtensor_in_weight_tensor(
     timeout=None,
     avoid_bitmap=None,
 ):
-    f_size, c_size, k_size = tensor.shape
-    kx_size = ky_size = k_size
+    f_size, c_size, kx_size, ky_size = tensor.shape
     if min_filters is not None and min_filters > f_size:
         raise ValueError("filter lowerbound must be lower than max filters")
     if min_channels is not None and min_channels > c_size:
         raise ValueError("channel lowerbound must be lower than max filters")
 
     tensor_cpy = np.copy(tensor)
-    # tensor_cpy[np.where(tensor_cpy == 0)] = -1
+    tensor_cpy[np.where(tensor_cpy == 0)] = -1
     m = gp.Model("densify")
     if timeout is not None:
         m.setParam(GRB.Param.TimeLimit, timeout)
@@ -161,7 +160,6 @@ def get_tensor_density(tensor):
     return prod(non_zeros.shape) / prod(tensor.shape)
 
 
-
 def tucker_decomposition_conv_layer(layer, rank):
     """Gets a conv layer,
     returns a nn.Sequential object with the Tucker decomposition.
@@ -256,18 +254,18 @@ def quantize_model(model):
 
 def main():
     tensor_size = (64, 64, 3)
-    weight_tensor = generate_sparse_tensor(tensor_size, density=0.05) # sparsity relationship weird
+    weight_tensor = generate_sparse_tensor(
+        tensor_size, density=0.05
+    )  # sparsity relationship weird
     nn_model_f32 = M(weight_tensor)
     nn_model_i8 = quantize_model(nn_model_f32)
-    print(
-        f"original layer density {get_tensor_density(nn_model_f32.conv.weight)}"
-    )    
+    print(f"original layer density {get_tensor_density(nn_model_f32.conv.weight)}")
     print(
         f"original quantized layer density {get_tensor_density(nn_model_i8.conv.weight())}"
     )
     for rank in range(1, 65):
-        print(f'rank:{rank}')
-        compressed_layers = tucker_decomposition_conv_layer(nn_model_f32.conv,rank)
+        print(f"rank:{rank}")
+        compressed_layers = tucker_decomposition_conv_layer(nn_model_f32.conv, rank)
         for layer in compressed_layers:
             compressed_nn_model = M(layer.weight.data.numpy())
             print(
@@ -279,45 +277,55 @@ def main():
             )
 
 
+def run_scheduling_optimizer():
+    tensor_size = (64, 64, 3)
+    weight_tensor = generate_sparse_tensor(
+        tensor_size, density=0.05
+    )  # sparsity relationship weird
+
+    input_tensor = weight_tensor
+    size = prod(input_tensor.shape[0:2])
+    density_tracker = []
+    target_size = 4
+    selection_bitmap = None
+    for i in range(size // target_size**2):
+        initial_size = input_tensor.shape[0]
+        print(
+            f"Reducing from tensor of size {initial_size} to tensors of size {target_size}"
+        )
+        (
+            output_tensor,
+            new_selection_bitmap,
+            dense_filter_indicies,
+            dense_channel_indicies,
+        ) = find_sparsest_subtensor_in_weight_tensor(
+            input_tensor,
+            target_size,
+            target_size,
+            timeout=25,
+            avoid_bitmap=selection_bitmap,
+        )
+        if prod(output_tensor.shape) == 0:
+            break
+        input_density = calc_density(input_tensor)
+        output_density = calc_density(output_tensor)
+        density_tracker.append(output_density)
+        try:
+            selection_bitmap.extend(new_selection_bitmap)
+        except AttributeError:
+            selection_bitmap = new_selection_bitmap
+
+        remaining_density = density_of_remaining_weights(input_tensor, selection_bitmap)
+
+        print(f"density of input tensor: {input_density}")
+        print(f"density of output tensor: {output_density}")
+        print(f"selected filters: {dense_filter_indicies}")
+        print(f"selected channels: {dense_channel_indicies}")
+        # print_selection_bitmap(input_tensor.shape[0:2], selection_bitmap)
+
+        # TODO: Fix bug in density tracker with random extra 0s at the end when density is too low
+        print(density_tracker)
+
+
 if __name__ == "__main__":
-    main()
-
-# input_tensor = weight_tensor
-# size = prod(input_tensor.shape[0:2])
-# density_tracker = []
-# target_size = 4
-# selection_bitmap = None
-# for i in range(size // target_size**2):
-#     initial_size = input_tensor.shape[0]
-#     print(
-#         f"Reducing from tensor of size {initial_size} to tensors of size {target_size}"
-#     )
-#     (
-#         output_tensor,
-#         new_selection_bitmap,
-#         dense_filter_indicies,
-#         dense_channel_indicies,
-#     ) = find_densest_subtensor_in_weight_tensor(
-#         input_tensor, target_size, None, timeout=25, avoid_bitmap=selection_bitmap
-#     )
-#     if prod(output_tensor.shape) == 0:
-#         break
-#     input_density = calc_density(input_tensor)
-#     output_density = calc_density(output_tensor)
-#     density_tracker.append(output_density)
-#     try:
-#         selection_bitmap.extend(new_selection_bitmap)
-#     except AttributeError:
-#         selection_bitmap = new_selection_bitmap
-
-#     remaining_density = density_of_remaining_weights(input_tensor, selection_bitmap)
-
-#     print(f"density of input tensor: {input_density}")
-#     print(f"density of output tensor: {output_density}")
-#     print(f"selected filters: {dense_filter_indicies}")
-#     print(f"selected channels: {dense_channel_indicies}")
-#     print_selection_bitmap(input_tensor.shape[0:2], selection_bitmap)
-
-# # TODO: Fix bug in density tracker with random extra 0s at the end when density is too low
-# print(density_tracker)
-# print("")
+    run_scheduling_optimizer()
